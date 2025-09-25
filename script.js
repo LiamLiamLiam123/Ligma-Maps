@@ -2,6 +2,34 @@ mapboxgl.accessToken = "pk.eyJ1IjoiY29kZW15aG9iYnkiLCJhIjoiY2tqbW1jNmxkMHg4bzJzb
 
 let map;
 let directions;
+let userMarker;
+
+// Watch position continuously (instead of one-time)
+navigator.geolocation.watchPosition(successLocation, errorLocation, {
+  enableHighAccuracy: true
+});
+
+function successLocation(position) {
+  const lng = position.coords.longitude;
+  const lat = position.coords.latitude;
+
+  if (!map) {
+    // First location → setup map
+    setUpMap([lng, lat]);
+  } else {
+    // Update marker & keep map following
+    userMarker.setLngLat([lng, lat]);
+
+    map.easeTo({
+      center: [lng, lat],
+      duration: 1000 // smooth follow animation
+    });
+  }
+}
+
+function errorLocation() {
+  setUpMap([-2.28, 41.45]);
+}
 
 function setUpMap(center) {
   map = new mapboxgl.Map({
@@ -21,36 +49,8 @@ function setUpMap(center) {
   });
   map.addControl(directions, "top-left");
 
-  // 🔵 Geolocate control (auto-follow + heading arrow)
-  const geolocate = new mapboxgl.GeolocateControl({
-    positionOptions: {
-      enableHighAccuracy: true
-    },
-    trackUserLocation: true,   // keep following
-    showUserHeading: true      // rotate with compass
-  });
-
-  map.addControl(geolocate);
-
-  // Start following as soon as the map loads
-  map.on("load", () => {
-    geolocate.trigger();
-  });
-}
-
-if ("geolocation" in navigator) {
-  navigator.geolocation.getCurrentPosition(
-    (position) => {
-      setUpMap([position.coords.longitude, position.coords.latitude]);
-    },
-    () => {
-      setUpMap([-2.28, 41.45]); // fallback location
-    },
-    {
-      enableHighAccuracy: true
-    }
-  );
-} else {
-  console.error("Geolocation not supported.");
-  setUpMap([-2.28, 41.45]);
+  // Add a blue marker to represent the user
+  userMarker = new mapboxgl.Marker({ color: "blue" })
+    .setLngLat(center)
+    .addTo(map);
 }
