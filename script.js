@@ -1,7 +1,6 @@
 mapboxgl.accessToken = "pk.eyJ1IjoiY29kZW15aG9iYnkiLCJhIjoiY2tqbW1jNmxkMHg4bzJzbWpmOXFpenY2byJ9.NshhLJgIl46JtWT6ZhKEDw";
 
 let map;
-let userMarker;
 let directions;
 
 function setUpMap(center) {
@@ -22,43 +21,33 @@ function setUpMap(center) {
   });
   map.addControl(directions, "top-left");
 
-  // Initial blue dot marker
-  userMarker = new mapboxgl.Marker({
-    color: "blue"
-  })
-    .setLngLat(center)
-    .addTo(map);
+  // 🔵 Geolocate control (auto-follow + heading arrow)
+  const geolocate = new mapboxgl.GeolocateControl({
+    positionOptions: {
+      enableHighAccuracy: true
+    },
+    trackUserLocation: true,   // keep following
+    showUserHeading: true      // rotate with compass
+  });
+
+  map.addControl(geolocate);
+
+  // Start following as soon as the map loads
+  map.on("load", () => {
+    geolocate.trigger();
+  });
 }
 
-// Track position live
 if ("geolocation" in navigator) {
-  navigator.geolocation.watchPosition(
+  navigator.geolocation.getCurrentPosition(
     (position) => {
-      const lng = position.coords.longitude;
-      const lat = position.coords.latitude;
-
-      if (!map) {
-        // First position → initialize map
-        setUpMap([lng, lat]);
-      } else {
-        // Update blue dot
-        userMarker.setLngLat([lng, lat]);
-
-        // Keep map centered on user smoothly
-        map.easeTo({
-          center: [lng, lat],
-          duration: 1000
-        });
-      }
+      setUpMap([position.coords.longitude, position.coords.latitude]);
     },
-    (error) => {
-      console.error("Error getting location:", error);
-      // fallback location
-      setUpMap([-2.28, 41.45]);
+    () => {
+      setUpMap([-2.28, 41.45]); // fallback location
     },
     {
-      enableHighAccuracy: true,
-      maximumAge: 0
+      enableHighAccuracy: true
     }
   );
 } else {
