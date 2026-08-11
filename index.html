@@ -1,31 +1,589 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="X-UA-Compatible" content="ie=edge">
-  <script src='https://api.mapbox.com/mapbox-gl-js/v1.12.0/mapbox-gl.js'></script>
-  <link href='https://api.mapbox.com/mapbox-gl-js/v1.12.0/mapbox-gl.css' rel='stylesheet' />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+  <title>Live Navigator</title>
+
+  <script src="https://api.mapbox.com/mapbox-gl-js/v1.12.0/mapbox-gl.js"></script>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v1.12.0/mapbox-gl.css" rel="stylesheet" />
   <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-directions/v4.1.0/mapbox-gl-directions.js"></script>
   <link
     rel="stylesheet"
     href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-directions/v4.1.0/mapbox-gl-directions.css"
     type="text/css"
   />
-  <title>Ligma Maps</title>
-  <style>
-    body {
-      margin: 0;
-    }
+  <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
 
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      font: 14px/1.4 -apple-system, Segoe UI, Roboto, sans-serif;
+    }
     #map {
       height: 100vh;
       width: 100vw;
     }
+    #status {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 6;
+      background: rgba(0, 0, 0, 0.75);
+      color: #fff;
+      padding: 8px 14px;
+      border-radius: 6px;
+      display: none;
+      max-width: 90vw;
+      text-align: center;
+    }
+
+    /* Turn-by-turn instruction banner */
+    #instruction-banner {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 4;
+      background: #1a73e8;
+      color: #fff;
+      padding: 14px 16px;
+      display: none;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    }
+    #instruction-banner .primary {
+      font-size: 18px;
+      font-weight: 600;
+    }
+    #instruction-banner .secondary {
+      font-size: 13px;
+      opacity: 0.9;
+      margin-top: 2px;
+    }
+
+    /* Bottom stats bar */
+    #stats-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 4;
+      background: rgba(20, 20, 20, 0.92);
+      color: #fff;
+      display: none;
+      justify-content: space-around;
+      align-items: center;
+      padding: 10px 8px calc(10px + env(safe-area-inset-bottom));
+    }
+    #stats-bar .stat {
+      text-align: center;
+    }
+    #stats-bar .stat .value {
+      font-size: 18px;
+      font-weight: 700;
+    }
+    #stats-bar .stat .label {
+      font-size: 11px;
+      opacity: 0.75;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    /* Floating control buttons */
+    #controls {
+      position: absolute;
+      right: 10px;
+      bottom: 90px;
+      z-index: 5;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    #controls button {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: none;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+      font-size: 18px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #controls button.active {
+      background: #1a73e8;
+      color: #fff;
+    }
+
+    /* Custom rotating user location arrow */
+    .user-arrow {
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.3s ease;
+    }
+    .user-arrow svg {
+      width: 100%;
+      height: 100%;
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+    }
   </style>
-  <script src="script.js" defer></script>
 </head>
 <body>
-  <div id='map'></div>
+  <div id="status"></div>
+
+  <div id="instruction-banner">
+    <div class="primary" id="instruction-primary">—</div>
+    <div class="secondary" id="instruction-secondary">—</div>
+  </div>
+
+  <div id="map"></div>
+
+  <div id="stats-bar">
+    <div class="stat">
+      <div class="value" id="stat-speed">0</div>
+      <div class="label" id="stat-speed-unit">km/h</div>
+    </div>
+    <div class="stat">
+      <div class="value" id="stat-distance">--</div>
+      <div class="label">Remaining</div>
+    </div>
+    <div class="stat">
+      <div class="value" id="stat-eta">--</div>
+      <div class="label">ETA</div>
+    </div>
+    <div class="stat">
+      <div class="value" id="stat-duration">--</div>
+      <div class="label">Time left</div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <button id="btn-follow" title="Recenter / follow">🎯</button>
+    <button id="btn-mute" title="Mute voice guidance">🔊</button>
+    <button id="btn-units" title="Toggle units">km</button>
+    <button id="btn-compass" title="North up / heading up">🧭</button>
+  </div>
+
+  <script>
+    // ⚠️ This token is visible to anyone who views this page's source.
+    // In Mapbox's dashboard, restrict it to your domain(s) or swap in your own.
+    mapboxgl.accessToken =
+      "pk.eyJ1IjoiY29kZW15aG9iYnkiLCJhIjoiY2tqbW1jNmxkMHg4bzJzbWpmOXFpenY2byJ9.NshhLJgIl46JtWT6ZhKEDw";
+
+    const FALLBACK_CENTER = [-2.28, 41.45]; // used if geolocation fails/denied
+    const OFF_ROUTE_THRESHOLD_M = 40;   // how far off the line before rerouting
+    const ANNOUNCE_DISTANCE_M = 150;    // speak the next maneuver this far out
+    const REROUTE_COOLDOWN_MS = 8000;   // don't spam reroute requests
+
+    const statusEl = document.getElementById("status");
+    const bannerEl = document.getElementById("instruction-banner");
+    const primaryEl = document.getElementById("instruction-primary");
+    const secondaryEl = document.getElementById("instruction-secondary");
+    const statsBarEl = document.getElementById("stats-bar");
+    const statSpeedEl = document.getElementById("stat-speed");
+    const statSpeedUnitEl = document.getElementById("stat-speed-unit");
+    const statDistanceEl = document.getElementById("stat-distance");
+    const statEtaEl = document.getElementById("stat-eta");
+    const statDurationEl = document.getElementById("stat-duration");
+
+    const btnFollow = document.getElementById("btn-follow");
+    const btnMute = document.getElementById("btn-mute");
+    const btnUnits = document.getElementById("btn-units");
+    const btnCompass = document.getElementById("btn-compass");
+
+    let map;
+    let directions;
+    let userMarker;
+    let userArrowEl;
+    let watchId = null;
+    let wakeLock = null;
+
+    let lastCoords = null;       // [lng, lat] of previous fix, for fallback bearing/speed calc
+    let lastFixTime = null;
+    let currentHeading = 0;
+
+    let activeRoute = null;      // route geometry (GeoJSON LineString coords) of current route
+    let routeSteps = [];         // flattened maneuver steps with cumulative distance
+    let currentStepIndex = 0;
+    let announcedStepIndex = -1;
+    let lastRerouteTime = 0;
+    let rerouting = false;
+
+    let isFollowing = true;      // camera follows + rotates with heading
+    let isMuted = false;
+    let units = "metric";        // "metric" | "imperial"
+
+    // ---------- Wake Lock ----------
+    async function requestWakeLock() {
+      if (!("wakeLock" in navigator)) {
+        console.warn("Wake Lock API not supported in this browser.");
+        return;
+      }
+      try {
+        wakeLock = await navigator.wakeLock.request("screen");
+      } catch (err) {
+        console.warn("Wake lock request failed:", err.message);
+      }
+    }
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") requestWakeLock();
+    });
+
+    // ---------- Status banner ----------
+    function showStatus(message, autoHideMs) {
+      statusEl.textContent = message;
+      statusEl.style.display = "block";
+      if (autoHideMs) {
+        setTimeout(() => { statusEl.style.display = "none"; }, autoHideMs);
+      }
+    }
+
+    // ---------- Formatting helpers ----------
+    function formatDistance(meters) {
+      if (meters == null || isNaN(meters)) return "--";
+      if (units === "imperial") {
+        const feet = meters * 3.28084;
+        if (feet < 528) return Math.round(feet) + " ft";
+        return (feet / 5280).toFixed(1) + " mi";
+      }
+      if (meters < 1000) return Math.round(meters) + " m";
+      return (meters / 1000).toFixed(1) + " km";
+    }
+
+    function formatDuration(seconds) {
+      if (seconds == null || isNaN(seconds)) return "--";
+      const mins = Math.round(seconds / 60);
+      if (mins < 60) return mins + " min";
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      return h + "h " + m + "m";
+    }
+
+    function formatEta(seconds) {
+      if (seconds == null || isNaN(seconds)) return "--";
+      const eta = new Date(Date.now() + seconds * 1000);
+      return eta.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+
+    function formatSpeed(metersPerSecond) {
+      if (metersPerSecond == null || isNaN(metersPerSecond) || metersPerSecond < 0) return 0;
+      if (units === "imperial") return Math.round(metersPerSecond * 2.23694); // mph
+      return Math.round(metersPerSecond * 3.6); // km/h
+    }
+
+    function speak(text) {
+      if (isMuted || !("speechSynthesis" in window)) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1;
+      window.speechSynthesis.speak(utterance);
+    }
+
+    // ---------- User marker (rotating arrow) ----------
+    function createUserArrowElement() {
+      const el = document.createElement("div");
+      el.className = "user-arrow";
+      el.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2 L20 21 L12 16.5 L4 21 Z" fill="#1a73e8" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/>
+        </svg>`;
+      return el;
+    }
+
+    function setUserHeading(deg) {
+      currentHeading = deg;
+      if (userArrowEl) {
+        userArrowEl.style.transform = `rotate(${deg}deg)`;
+      }
+    }
+
+    // ---------- Map setup ----------
+    function setUpMap(center) {
+      map = new mapboxgl.Map({
+        container: "map",
+        style: "mapbox://styles/mapbox/streets-v11",
+        center: center,
+        zoom: 16,
+        pitch: 0
+      });
+
+      map.addControl(new mapboxgl.NavigationControl());
+
+      map.on("error", (e) => {
+        console.error("Mapbox error:", e && e.error);
+        showStatus("Map failed to load. Check your access token / network.", 5000);
+      });
+
+      // If the user drags the map manually, drop out of follow mode
+      map.on("dragstart", () => {
+        isFollowing = false;
+        btnFollow.classList.remove("active");
+      });
+
+      map.on("load", () => {
+        directions = new MapboxDirections({
+          accessToken: mapboxgl.accessToken,
+          unit: "metric",
+          language: "en",
+          controls: { instructions: false } // we render our own instruction banner
+        });
+        map.addControl(directions, "top-left");
+
+        directions.on("route", (e) => {
+          if (!e.route || !e.route.length) return;
+          onNewRoute(e.route[0]);
+        });
+
+        directions.on("error", () => {
+          showStatus("Couldn't calculate a route. Try a different destination.", 4000);
+        });
+
+        userArrowEl = createUserArrowElement();
+        userMarker = new mapboxgl.Marker({ element: userArrowEl })
+          .setLngLat(center)
+          .addTo(map);
+
+        if (directions.setOrigin) {
+          directions.setOrigin(center);
+        }
+
+        statsBarEl.style.display = "flex";
+      });
+    }
+
+    // ---------- Route handling ----------
+    function onNewRoute(route) {
+      activeRoute = route.geometry.coordinates;
+      routeSteps = [];
+
+      let cumulative = 0;
+      route.legs.forEach((leg) => {
+        leg.steps.forEach((step) => {
+          routeSteps.push({
+            instruction: step.maneuver.instruction,
+            location: step.maneuver.location, // [lng, lat]
+            distanceAlong: cumulative,        // meters along route at start of this step
+            stepDistance: step.distance       // meters covered during this step
+          });
+          cumulative += step.distance;
+        });
+      });
+
+      currentStepIndex = 0;
+      announcedStepIndex = -1;
+      rerouting = false;
+
+      bannerEl.style.display = "block";
+      updateInstructionPanel();
+      updateStatsPanel(route.distance, route.duration);
+    }
+
+    function updateInstructionPanel() {
+      const step = routeSteps[currentStepIndex];
+      if (!step) {
+        bannerEl.style.display = "none";
+        return;
+      }
+      primaryEl.textContent = step.instruction;
+      const nextStep = routeSteps[currentStepIndex + 1];
+      secondaryEl.textContent = nextStep
+        ? "Then: " + nextStep.instruction
+        : "Arriving at destination";
+    }
+
+    function updateStatsPanel(remainingDistanceM, remainingDurationS) {
+      statDistanceEl.textContent = formatDistance(remainingDistanceM);
+      statEtaEl.textContent = formatEta(remainingDurationS);
+      statDurationEl.textContent = formatDuration(remainingDurationS);
+    }
+
+    // Recalculates progress along the route based on the user's current position
+    function updateRouteProgress(userLngLat, speedMps) {
+      if (!activeRoute || activeRoute.length < 2) return;
+
+      const line = turf.lineString(activeRoute);
+      const point = turf.point(userLngLat);
+      const snapped = turf.nearestPointOnLine(line, point, { units: "meters" });
+      const distanceOffRoute = turf.distance(point, snapped, { units: "meters" });
+      const traveledAlong = snapped.properties.location; // meters from route start (units: meters set above -> actually turf uses the 'units' option for this too)
+
+      // Off-route detection -> reroute
+      if (distanceOffRoute > OFF_ROUTE_THRESHOLD_M) {
+        maybeReroute(userLngLat);
+        return;
+      }
+
+      // Figure out which step we're currently on
+      let idx = 0;
+      for (let i = 0; i < routeSteps.length; i++) {
+        if (traveledAlong >= routeSteps[i].distanceAlong) idx = i;
+      }
+      currentStepIndex = idx;
+      updateInstructionPanel();
+
+      // Distance to the upcoming maneuver
+      const step = routeSteps[currentStepIndex];
+      const maneuverPoint = turf.point(step.location);
+      const distanceToManeuver = turf.distance(point, maneuverPoint, { units: "meters" });
+
+      if (distanceToManeuver <= ANNOUNCE_DISTANCE_M && announcedStepIndex !== currentStepIndex) {
+        speak(step.instruction);
+        announcedStepIndex = currentStepIndex;
+      }
+
+      // Remaining distance/time for the whole route (rough estimate)
+      const totalDistance = routeSteps.length
+        ? routeSteps[routeSteps.length - 1].distanceAlong + routeSteps[routeSteps.length - 1].stepDistance
+        : 0;
+      const remainingDistance = Math.max(totalDistance - traveledAlong, 0);
+      const fallbackSpeed = speedMps && speedMps > 0.5 ? speedMps : 8; // ~28 km/h fallback
+      const remainingDuration = remainingDistance / fallbackSpeed;
+
+      updateStatsPanel(remainingDistance, remainingDuration);
+
+      if (remainingDistance < 15) {
+        speak("You have arrived at your destination.");
+        bannerEl.style.display = "none";
+        activeRoute = null;
+        routeSteps = [];
+      }
+    }
+
+    function maybeReroute(userLngLat) {
+      const now = Date.now();
+      if (rerouting || now - lastRerouteTime < REROUTE_COOLDOWN_MS) return;
+      if (!directions || !directions.setOrigin) return;
+
+      rerouting = true;
+      lastRerouteTime = now;
+      showStatus("Off route — recalculating…", 3000);
+      directions.setOrigin(userLngLat);
+    }
+
+    // ---------- Geolocation ----------
+    function successLocation(position) {
+      const { longitude: lng, latitude: lat, speed, heading } = position.coords;
+      const coords = [lng, lat];
+      const now = Date.now();
+
+      if (!map) {
+        setUpMap(coords);
+        lastCoords = coords;
+        lastFixTime = now;
+        return;
+      }
+
+      if (userMarker) userMarker.setLngLat(coords);
+
+      // Determine heading: prefer device-reported heading, else derive from movement
+      let bearing = currentHeading;
+      if (heading != null && !isNaN(heading)) {
+        bearing = heading;
+      } else if (lastCoords && (coords[0] !== lastCoords[0] || coords[1] !== lastCoords[1])) {
+        bearing = turf.bearing(turf.point(lastCoords), turf.point(coords));
+      }
+      setUserHeading(bearing);
+
+      // Determine speed: prefer device-reported speed, else derive from distance/time
+      let speedMps = speed;
+      if ((speedMps == null || isNaN(speedMps)) && lastCoords && lastFixTime) {
+        const dtSec = (now - lastFixTime) / 1000;
+        if (dtSec > 0) {
+          const distM = turf.distance(turf.point(lastCoords), turf.point(coords), { units: "meters" });
+          speedMps = distM / dtSec;
+        }
+      }
+      statSpeedEl.textContent = formatSpeed(speedMps);
+      statSpeedUnitEl.textContent = units === "imperial" ? "mph" : "km/h";
+
+      if (isFollowing) {
+        map.easeTo({
+          center: coords,
+          bearing: bearing,
+          pitch: 55,
+          zoom: 17.5,
+          duration: 1000
+        });
+      }
+
+      if (activeRoute) {
+        updateRouteProgress(coords, speedMps);
+      }
+
+      lastCoords = coords;
+      lastFixTime = now;
+    }
+
+    function errorLocation(err) {
+      console.warn("Geolocation error:", err && err.message);
+      if (!map) {
+        showStatus("Couldn't get your location — showing a default area.", 4000);
+        setUpMap(FALLBACK_CENTER);
+      } else {
+        showStatus("Lost GPS signal…", 3000);
+      }
+    }
+
+    function startWatching() {
+      if (!("geolocation" in navigator)) {
+        showStatus("Geolocation isn't supported by this browser.", 4000);
+        setUpMap(FALLBACK_CENTER);
+        return;
+      }
+      watchId = navigator.geolocation.watchPosition(successLocation, errorLocation, {
+        enableHighAccuracy: true,
+        maximumAge: 2000,
+        timeout: 10000
+      });
+    }
+
+    window.addEventListener("beforeunload", () => {
+      if (watchId !== null && "geolocation" in navigator) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+      if (wakeLock) wakeLock.release().catch(() => {});
+    });
+
+    // ---------- Control buttons ----------
+    btnFollow.addEventListener("click", () => {
+      isFollowing = true;
+      btnFollow.classList.add("active");
+      if (map && lastCoords) {
+        map.easeTo({ center: lastCoords, bearing: currentHeading, pitch: 55, zoom: 17.5 });
+      }
+    });
+
+    btnMute.addEventListener("click", () => {
+      isMuted = !isMuted;
+      btnMute.textContent = isMuted ? "🔇" : "🔊";
+      btnMute.classList.toggle("active", isMuted);
+      if (isMuted && "speechSynthesis" in window) window.speechSynthesis.cancel();
+    });
+
+    btnUnits.addEventListener("click", () => {
+      units = units === "metric" ? "imperial" : "metric";
+      btnUnits.textContent = units === "metric" ? "km" : "mi";
+    });
+
+    btnCompass.addEventListener("click", () => {
+      if (!map) return;
+      isFollowing = false;
+      btnFollow.classList.remove("active");
+      map.easeTo({ bearing: 0, pitch: 0 });
+    });
+
+    // ---------- Boot ----------
+    btnFollow.classList.add("active");
+    startWatching();
+    requestWakeLock();
+  </script>
 </body>
 </html>
